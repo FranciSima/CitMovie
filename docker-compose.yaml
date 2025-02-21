@@ -1,0 +1,87 @@
+version: '3.8'
+
+services:
+  traefik:
+    image: traefik:2.5
+    container_name: traefik
+    command:
+      - --api=true
+      - --providers.docker=true
+      - --entrypoints.web.address=:80
+      - --entrypoints.websecure.address=:443
+      - --certificatesresolvers.letsencrypt.acme.httpchallenge=true
+      - --certificatesresolvers.letsencrypt.acme.httpchallenge.entrypoint=web
+      - --certificatesresolvers.letsencrypt.acme.email="simafranci23@gmail.com"
+      - --certificatesresolvers.letsencrypt.acme.storage=/letsencrypt/acme.json
+    ports:
+      - "80:80"
+      - "443:443"
+    labels:
+      - traefik.http.routers.to-https.rule=HostRegexp(`{host:.+}`)
+      - traefik.http.routers.to-https.entrypoints=web
+      - traefik.http.routers.to-https.middlewares=to-https
+      - traefik.http.middlewares.to-https.redirectscheme.scheme=https
+      - traefik.http.routers.traefik_web.rule=Host(`traefik.cit-movie.xcloud.al`)
+      - traefik.http.routers.traefik_web.entrypoints=websecure
+      - traefik.http.routers.traefik_web.service=api@internal
+      - traefik.http.routers.traefik_web.tls=true
+      - traefik.http.routers.traefik_web.tls.certresolver=${CERT_RESOLVER}
+    volumes:
+      - ./letsencrypt:/letsencrypt
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - traefik-network
+    restart: always
+
+  app:
+    build: ./src
+    container_name: php_app
+    volumes:
+      - ./src:/var/www/html
+    depends_on:
+      - db
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.php_app.rule=Host(`cit-movie.xcloud.al`)
+      - traefik.http.routers.php_app.entrypoints=websecure
+      - traefik.http.routers.php_app.tls.certresolver=${CERT_RESOLVER}
+      - traefik.http.services.php_app.loadbalancer.server.port=80
+    networks:
+      - traefik-network
+
+  db:
+    image: mysql:8.0
+    container_name: mysql_db
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: "1234"
+      MYSQL_DATABASE: "movietheatredb"
+    volumes:
+      - db_data:/var/lib/mysql
+    networks:
+      - traefik-network
+
+  phpmyadmin:
+    image: phpmyadmin/phpmyadmin
+    container_name: phpmyadmin
+    restart: always
+    depends_on:
+      - db
+    environment:
+      PMA_HOST: db
+      MYSQL_ROOT_PASSWORD: "1234"
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.phpmyadmin.rule=Host(`phpmyadmin.cit-movie.xcloud.al`)
+      - traefik.http.routers.phpmyadmin.entrypoints=websecure
+      - traefik.http.routers.phpmyadmin.tls.certresolver=${CERT_RESOLVER}
+      - traefik.http.services.phpmyadmin.loadbalancer.server.port=80
+    networks:
+      - traefik-network
+
+volumes:
+  db_data:
+
+networks:
+  traefik-network:
+    name: traefik-network
